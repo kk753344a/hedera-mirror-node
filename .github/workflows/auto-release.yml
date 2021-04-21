@@ -104,7 +104,7 @@ jobs:
         uses: peter-evans/create-pull-request@v3
         with:
           body: ''
-          branch: create-pull-request/version-bump
+          branch: create-pull-request/${{ env.RELEASE_BRANCH }}
           delete-branch: true
           signoff: true
           title: Merge version bump for ${{ env.RELEASE_CANDIDATE_VERSION }}
