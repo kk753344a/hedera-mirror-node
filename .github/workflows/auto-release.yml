@@ -1,0 +1,123 @@
+name: Automated Release
+
+on:
+  milestone:
+    types: [closed]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CHANGELOG: CHANGELOG.md
+      MILESTONE_TITLE: ${{ github.event.milestone.title }}
+      RELEASE_NOTES_FILENAME: release_notes
+      RELEASE_NOTES_FULLNAME: release_notes.md
+
+    steps:
+      - name: Set Release Env Variables
+        run: |
+          [[ "$MILESTONE_TITLE" =~ ([0-9]*\.[0-9]*)\.([0-9]*) ]] || { echo "Invalid milestone \"${MILESTONE_TITLE}\""; exit 1; }
+          RELEASE_BRANCH="release/${BASH_REMATCH[1]}"
+          RELEASE_CANDIDATE_TAG=v${BASH_REMATCH}-rc1
+          RELEASE_CANDIDATE_VERSION=${BASH_REMATCH}-rc1
+          RELEASE_TAG=v${BASH_REMATCH}
+          RELEASE_VERSION=${BASH_REMATCH}
+          VERSION_PATCH=${BASH_REMATCH[2]}
+
+          echo "RELEASE_BRANCH=${RELEASE_BRANCH}" >> $GITHUB_ENV
+          echo "RELEASE_CANDIDATE_TAG=${RELEASE_CANDIDATE_TAG}" >> $GITHUB_ENV
+          echo "RELEASE_CANDIDATE_VERSION=${RELEASE_CANDIDATE_VERSION}" >> $GITHUB_ENV
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_ENV
+          echo "VERSION_PATCH=${VERSION_PATCH}" >> $GITHUB_ENV
+
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Cache Maven packages
+        uses: actions/cache@v2
+        with:
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          path: ~/.m2
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Create and Switch to Release Branch
+        run: |
+          if ! git ls-remote --exit-code --heads --quiet origin ${RELEASE_BRANCH}; then
+            git checkout -b ${RELEASE_BRANCH}
+            git push -u origin ${RELEASE_BRANCH}
+          else
+            git checkout ${RELEASE_BRANCH}
+          fi
+
+      - name: Get Chart Version
+        run: |
+          CHART_VERSION=$(sed -rn 's/<release\.chartVersion>(.*)<\/release.chartVersion>/\1/p' pom.xml)
+          [[ "$CHART_VERSION" =~ ([0-9]*)\.([0-9]*)\.([0-9]*) ]] || { echo "Invalid chart version ${CHART_VERSION}"; exit 1; }
+          CHART_VERSION_MAJOR=${BASH_REMATCH[1]}
+          CHART_VERSION_MINOR=${BASH_REMATCH[2]}
+          if [ "$VERSION_PATCH" = "0" ]; then
+            CHART_VERSION_MINOR=$((CHART_VERSION_MINOR+1))
+          fi
+          CHART_VERSION="${CHART_VERSION_MAJOR}.${CHART_VERSION_MINOR}.${VERSION_PATCH}-rc1"
+
+          echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
+
+      - name: Update Pom
+        run: |
+          sed -i -r -e 's/(<release\.version>).*(<\/release\.version>)/\1'${RELEASE_CANDIDATE_VERSION}'\2/g' \
+            -e 's/(<release\.chartVersion>).*(<\/release\.chartVersion>)/\1'${CHART_VERSION}'\2/g' pom.xml
+
+      - name: Maven Release
+        run: ./mvnw clean package -N -P=release
+
+      - name: Create Release Notes
+        uses: Decathlon/release-notes-generator-action@v3.1.4
+        env:
+          FILENAME: ${{ env.RELEASE_NOTES_FILENAME }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Changelog
+        run: |
+          RELEASE_DATE=$(date +%Y-%m-%d)
+          TMPFILE=$(mktemp --suffix .md)
+          cp $CHANGELOG $TMPFILE
+          echo -e "# ${RELEASE_DATE} ${RELEASE_VERSION}\n" > $CHANGELOG
+          cat $RELEASE_NOTES_FULLNAME $TMPFILE >> $CHANGELOG
+          rm -f $TMPFILE
+
+      - name: Commit and Tag
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_author: Mirrornode <mirrornode@hedera.com>
+          commit_message: Bump version to ${{ env.RELEASE_CANDIDATE_VERSION }}
+          commit_options: '--no-verify --signoff'
+          commit_user_email: mirrornode@hedera.com
+          commit_user_name: Mirrornode
+          tagging_message: ${{ env.RELEASE_CANDIDATE_TAG }}
+
+      - name: Reset to Release Branch
+        run: |
+          git checkout master
+          git reset --hard ${RELEASE_BRANCH}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v3
+        with:
+          body: ''
+          branch: create-pull-request/version-bump
+          delete-branch: true
+          signoff: true
+          title: Merge version bump for ${{ env.RELEASE_CANDIDATE_VERSION }}
+
+      - name: Create Draft Github Release
+        uses: ncipollo/release-action@v1
+        with:
+          bodyFile: ${{ env.RELEASE_NOTES_FULLNAME }}
+          commit: ${{ env.RELEASE_BRANCH }}
+          draft: true
+          name: ${{ env.RELEASE_TAG }}
+          tag: ${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
