@@ -30,7 +30,9 @@ jobs:
           EVENT_NAME="${{ github.event_name }}"
           case "$EVENT_NAME" in
             "milestone" )
-              RELEASE_VERSION="${{ github.event.milestone.title }}"
+              TITLE="${{ github.event.milestone.title }}"
+              [[ "$TITLE" =~ (([0-9]*\.){2}[0-9]*) ]] || { echo "Invalid milestone title $TITLE"; exit 1; }
+              RELEASE_VERSION=${BASH_REMATCH}
               ;;
             "workflow_dispatch" )
               RELEASE_VERSION="${{ github.event.inputs.version }}-${{ github.event.inputs.preReleaseIdentifier }}"
