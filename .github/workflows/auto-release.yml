@@ -3,33 +3,51 @@ name: Automated Release
 on:
   milestone:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version'
+        required: true
+      chartVersion:
+        description: 'Chart Version'
+        required: true
+      preReleaseIdentifier:
+        description: 'PreRelease Identifier, e.g., alpha1, rc1'
+        required: true
+        default: 'rc1'
 
 jobs:
   release:
     runs-on: ubuntu-latest
     env:
       CHANGELOG: CHANGELOG.md
-      MILESTONE_TITLE: ${{ github.event.milestone.title }}
       RELEASE_NOTES_FILENAME: release_notes
       RELEASE_NOTES_FULLNAME: release_notes.md
 
     steps:
-      - name: Set Release Env Variables
+      - name: Get Version
         run: |
-          [[ "$MILESTONE_TITLE" =~ ([0-9]*\.[0-9]*)\.([0-9]*) ]] || { echo "Invalid milestone \"${MILESTONE_TITLE}\""; exit 1; }
+          EVENT_NAME="${{ github.event_name }}"
+          case "$EVENT_NAME" in
+            "milestone" )
+              RELEASE_VERSION="${{ github.event.milestone.title }}"
+              ;;
+            "workflow_dispatch" )
+              RELEASE_VERSION="${{ github.event.inputs.version }}-${{ github.event.inputs.preReleaseIdentifier }}"
+              ;;
+            *)
+              echo "Unsupported event_name $EVENT_NAME"
+              exit 1
+            ;;
+          esac
+
+          [[ "$RELEASE_VERSION" =~ ^([0-9]*\.[0-9]*)\.[0-9]* ]] || { echo "Invalid version ${RELEASE_VERSION}"; exit 1; }
           RELEASE_BRANCH="release/${BASH_REMATCH[1]}"
-          RELEASE_CANDIDATE_TAG=v${BASH_REMATCH}-rc1
-          RELEASE_CANDIDATE_VERSION=${BASH_REMATCH}-rc1
-          RELEASE_TAG=v${BASH_REMATCH}
-          RELEASE_VERSION=${BASH_REMATCH}
-          VERSION_PATCH=${BASH_REMATCH[2]}
+          RELEASE_TAG=v${RELEASE_VERSION}
 
           echo "RELEASE_BRANCH=${RELEASE_BRANCH}" >> $GITHUB_ENV
-          echo "RELEASE_CANDIDATE_TAG=${RELEASE_CANDIDATE_TAG}" >> $GITHUB_ENV
-          echo "RELEASE_CANDIDATE_VERSION=${RELEASE_CANDIDATE_VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
           echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_ENV
-          echo "VERSION_PATCH=${VERSION_PATCH}" >> $GITHUB_ENV
 
       - name: Checkout Repository
         uses: actions/checkout@v2
@@ -52,34 +70,35 @@ jobs:
             git checkout ${RELEASE_BRANCH}
           fi
 
-      - name: Get Chart Version
+      - name: Get Chart Version from Workflow Dispatch Input
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          CHART_VERSION=$(sed -rn 's/<release\.chartVersion>(.*)<\/release.chartVersion>/\1/p' pom.xml)
-          [[ "$CHART_VERSION" =~ ([0-9]*)\.([0-9]*)\.([0-9]*) ]] || { echo "Invalid chart version ${CHART_VERSION}"; exit 1; }
-          CHART_VERSION_MAJOR=${BASH_REMATCH[1]}
-          CHART_VERSION_MINOR=${BASH_REMATCH[2]}
-          if [ "$VERSION_PATCH" = "0" ]; then
-            CHART_VERSION_MINOR=$((CHART_VERSION_MINOR+1))
-          fi
-          CHART_VERSION="${CHART_VERSION_MAJOR}.${CHART_VERSION_MINOR}.${VERSION_PATCH}-rc1"
+          CHART_VERSION="${{ github.event.inputs.chartVersion }}-${{ github.event.inputs.preReleaseIdentifier}}"
+          echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
 
+      - name: Get Chart Version from Release Branch
+        if: ${{ github.event_name == 'milestone' }}
+        run: |
+          CHART_VERSION=$(sed -rn 's/<release\.chartVersion>([0-9.]*).*<\/release.chartVersion>/\1/p' pom.xml | xargs)
           echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
 
       - name: Update Pom
         run: |
-          sed -i -r -e 's/(<release\.version>).*(<\/release\.version>)/\1'${RELEASE_CANDIDATE_VERSION}'\2/g' \
+          sed -i -r -e 's/(<release\.version>).*(<\/release\.version>)/\1'${RELEASE_VERSION}'\2/g' \
             -e 's/(<release\.chartVersion>).*(<\/release\.chartVersion>)/\1'${CHART_VERSION}'\2/g' pom.xml
 
       - name: Maven Release
         run: ./mvnw clean package -N -P=release
 
       - name: Create Release Notes
+        if: ${{ github.event_name == 'milestone' }}
         uses: Decathlon/release-notes-generator-action@v3.1.4
         env:
           FILENAME: ${{ env.RELEASE_NOTES_FILENAME }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Changelog
+        if: ${{ github.event_name == 'milestone' }}
         run: |
           RELEASE_DATE=$(date +%Y-%m-%d)
           TMPFILE=$(mktemp --suffix .md)
@@ -91,11 +110,11 @@ jobs:
       - name: Commit and Tag
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          commit_message: Bump version to ${{ env.RELEASE_CANDIDATE_VERSION }}
+          commit_message: Bump version to ${{ env.RELEASE_VERSION }}
           commit_options: '--no-verify --signoff'
-          tagging_message: ${{ env.RELEASE_CANDIDATE_TAG }}
+          tagging_message: ${{ env.RELEASE_TAG }}
 
-      - name: Reset to Release Branch
+      - name: Reset Master to Release Branch
         run: |
           git checkout master
           git reset --hard ${RELEASE_BRANCH}
@@ -107,14 +126,16 @@ jobs:
           branch: create-pull-request/${{ env.RELEASE_BRANCH }}
           delete-branch: true
           signoff: true
-          title: Merge version bump for ${{ env.RELEASE_CANDIDATE_VERSION }}
+          title: Merge version bump for ${{ env.RELEASE_VERSION }}
 
-      - name: Create Draft Github Release
+      - name: Create Github Release
         uses: ncipollo/release-action@v1
         with:
           bodyFile: ${{ env.RELEASE_NOTES_FULLNAME }}
           commit: ${{ env.RELEASE_BRANCH }}
-          draft: true
+          draft: ${{ github.event_name == 'milestone' }}
           name: ${{ env.RELEASE_TAG }}
+          omitBody: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
           tag: ${{ env.RELEASE_TAG }}
           token: ${{ secrets.GITHUB_TOKEN }}
