@@ -40,6 +40,10 @@ jobs:
         with:
           version: ${{ env.RELEASE_VERSION }}
 
+      - name: Verify Version Prerelease
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.release_semver.outputs.prerelease == '' }}
+        run: exit 1
+
       - name: Set Release Environment Variables
         run: |
           [[ -z "${{ steps.release_semver.outputs.version }}" ]] && { echo "Invalid version"; exit 1; }
@@ -52,6 +56,17 @@ jobs:
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
           echo "RELEASE_VERSION_NEXT_SNAPSHOT=${RELEASE_VERSION_NEXT_SNAPSHOT}" >> $GITHUB_ENV
 
+      - name: Parse Chart Version from Workflow Dispatch Input
+        uses: apexskier/github-semver-parse@v1
+        id: input_chart_semver
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        with:
+          version: ${{ github.event.inputs.chartVersion }}
+
+      - name: Verify Chart Version Prerelease
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.input_chart_semver.outputs.prerelease == '' }}
+        run: exit 1
+
       - name: Checkout Repository
         uses: actions/checkout@v2
         with:
@@ -60,7 +75,7 @@ jobs:
       - name: Cache Maven Packages
         uses: actions/cache@v2
         with:
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          key: ${{ runner.os }}-m2-${{ hashFiles('pom.xml') }}
           path: ~/.m2
           restore-keys: ${{ runner.os }}-m2
 
