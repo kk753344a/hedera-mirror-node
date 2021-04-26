@@ -42,7 +42,7 @@ jobs:
 
       - name: Verify Version Prerelease
         if: ${{ github.event_name == 'workflow_dispatch' && steps.release_semver.outputs.prerelease == '' }}
-        run: exit 1
+        run: echo "Workflow dispatch not supported for GA release, and the milestone should be closed instead" && exit 1
 
       - name: Set Release Environment Variables
         run: |
@@ -65,7 +65,7 @@ jobs:
 
       - name: Verify Chart Version Prerelease
         if: ${{ github.event_name == 'workflow_dispatch' && steps.input_chart_semver.outputs.prerelease == '' }}
-        run: exit 1
+        run: echo "Workflow dispatch not supported for GA release, and the milestone should be closed instead" && exit 1
 
       - name: Checkout Repository
         uses: actions/checkout@v2
@@ -201,7 +201,6 @@ jobs:
           commit: ${{ env.RELEASE_BRANCH }}
           draft: true
           name: ${{ env.RELEASE_TAG }}
-          omitBody: ${{ github.event_name == 'workflow_dispatch' }}
           prerelease: ${{ steps.release_semver.outputs.prerelease != '' }}
           tag: ${{ env.RELEASE_TAG }}
           token: ${{ secrets.GITHUB_TOKEN }}
