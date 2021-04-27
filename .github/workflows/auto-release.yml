@@ -120,13 +120,8 @@ jobs:
           CHART_VERSION_NEXT_SNAPSHOT="${{ steps.chart_semver.outputs.major }}.${CHART_VERSION_NEXT_MINOR}.0-SNAPSHOT"
           echo "CHART_VERSION_NEXT_SNAPSHOT=${CHART_VERSION_NEXT_SNAPSHOT}" >> $GITHUB_ENV
 
-      - name: Update Pom
-        run: |
-          sed -i -r -e 's/(<release\.version>).*(<\/release\.version>)/\1'${RELEASE_VERSION}'\2/g' \
-            -e 's/(<release\.chartVersion>).*(<\/release\.chartVersion>)/\1'${CHART_VERSION}'\2/g' pom.xml
-
       - name: Maven Release
-        run: ./mvnw clean package -N -P=release
+        run: ./mvnw clean package -Drelease.version=$RELEASE_VERSION -Drelease.chartVersion=$CHART_VERSION -N -P=release
 
       - name: Create Release Notes
         if: ${{ github.event_name == 'milestone' }}
@@ -177,13 +172,8 @@ jobs:
           git checkout master
           git reset --hard ${RELEASE_BRANCH}
 
-      - name: Update Version to Next Minor Snapshot
-        run: |
-          sed -i -r -e 's/(<release\.version>).*(<\/release\.version>)/\1'${RELEASE_VERSION_NEXT_SNAPSHOT}'\2/g' \
-            -e 's/(<release\.chartVersion>).*(<\/release\.chartVersion>)/\1'${CHART_VERSION_NEXT_SNAPSHOT}'\2/g' pom.xml
-
       - name: Maven Release for Next Minor Snapshot
-        run: ./mvnw clean package -N -P=release
+        run: ./mvnw clean package -Drelease.version=$RELEASE_VERSION_NEXT_SNAPSHOT -Drelease.chartVersion=$CHART_VERSION_NEXT_SNAPSHOT -N -P=release
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v3
