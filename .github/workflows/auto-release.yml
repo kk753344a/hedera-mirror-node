@@ -147,16 +147,19 @@ jobs:
           else
             cp $RELEASE_NOTES_FULLNAME $GITHUB_RELEASE_NOTES
           fi
-          sed -r 's/^(#+) /\1# /g' $GITHUB_RELEASE_NOTES > $TMP_RELEASE_NOTES
+          RELEASE_NOTES=$(sed -r 's/^(#+) /\1# /g' $GITHUB_RELEASE_NOTES)
 
-          FIRST_LINE=$(grep -E -n -m 1 "^## ${SEMVER_REGEX}" $CHANGELOG | cut -d: -f1)
-          FIRST_LINE=${FIRST_LINE:-1}
-          tail -n +${FIRST_LINE} $CHANGELOG > $TMP_CHANGELOG
-          echo -e "# Hedera Mirror Node Changelog\n" > $CHANGELOG
-          echo -e "## ${RELEASE_VERSION} (${RELEASE_DATE})\n" >> $CHANGELOG
-          cat $TMP_RELEASE_NOTES >> $CHANGELOG
-          echo "" >> $CHANGELOG
-          cat $TMP_CHANGELOG >> $CHANGELOG
+          CHANGELOG_TITLE="# Hedera Mirror Node Changelog"
+          CHANGELOG_PREVIOUS=$(sed 'N; N; 0,/^'"${CHANGELOG_TITLE}"'\n.*\n/s///' $CHANGELOG)
+          cat > $CHANGELOG <<EOF
+          ${CHANGELOG_TITLE}
+
+          ## ${RELEASE_VERSION} (${RELEASE_DATE})
+
+          ${RELEASE_NOTES}
+
+          ${CHANGELOG_PREVIOUS}
+          EOF
 
           echo "GITHUB_RELEASE_NOTES=${GITHUB_RELEASE_NOTES}" >> $GITHUB_ENV
 
