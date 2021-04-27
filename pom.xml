@@ -49,18 +49,18 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.4.4</version>
+        <version>2.4.5</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
     <properties>
         <dependency-check.version>6.1.5</dependency-check.version>
-        <disruptor.version>3.4.2</disruptor.version> <!-- Used for asynchronous logging -->
+        <disruptor.version>3.4.3</disruptor.version> <!-- Used for asynchronous logging -->
         <docker-maven-plugin.version>0.35.0</docker-maven-plugin.version>
         <docker.push.repository>gcr.io/mirrornode</docker.push.repository>
         <docker.resources>${project.build.directory}/container</docker.resources>
         <docker.tag.version>${release.version}</docker.tag.version>
-        <embedded.testcontainers.version>2.0.5</embedded.testcontainers.version>
+        <embedded.testcontainers.version>2.0.6</embedded.testcontainers.version>
         <git-commit-id-plugin.version>4.0.4</git-commit-id-plugin.version>
         <grpc-spring-boot.version>2.11.0.RELEASE</grpc-spring-boot.version>
         <grpc.version>1.37.0</grpc.version>
@@ -70,7 +70,7 @@
         <jacoco.version>0.8.6</jacoco.version>
         <java.version>11</java.version>
         <javax.version>1</javax.version>
-        <jib.version>2.8.0</jib.version>
+        <jib.version>3.0.0</jib.version>
         <jmeter.version>5.4.1</jmeter.version>
         <micrometer-jvm-extras.version>0.2.2</micrometer-jvm-extras.version>
         <msgpack.version>0.8.22</msgpack.version>
@@ -444,47 +444,67 @@
                         <version>${replacer.version}</version>
                         <configuration>
                             <basedir>${project.basedir}</basedir>
-                            <includes>
-                                <include>charts/**/Chart.yaml</include>
-                                <include>docker-compose.yml</include>
-                                <include>hedera-mirror-rest/**/openapi.yml</include>
-                                <include>hedera-mirror-rest/package*.json</include>
-                                <include>hedera-mirror-rest/monitoring/monitor_apis/package*.json</include>
-                                <include>hedera-mirror-rosetta/config/application*.yml</include>
-                                <include>hedera-mirror-test/src/test/resources/k8s/*.yml</include>
-                            </includes>
-                            <replacements>
-                                <replacement>
-                                    <token>
-                                        <![CDATA[(?<="hedera-mirror-(rest|monitor)",\s{3}"version": ")[^"]+]]></token>
-                                    <value>${release.version}</value>
-                                </replacement>
-                                <replacement>
-                                    <token><![CDATA[(?<=appVersion: ")[0-9a-zA-Z.-]+]]></token>
-                                    <value>${release.version}</value>
-                                </replacement>
-                                <replacement>
-                                    <token><![CDATA[(?<=\sversion: )[0-9a-zA-Z.-]+]]></token>
-                                    <value>${release.chartVersion}</value>
-                                </replacement>
-                                <replacement>
-                                    <token><![CDATA[(?<=(\s{3})version: )[0-9a-zA-Z.-]+]]></token>
-                                    <value>${release.version}</value>
-                                </replacement>
-                                <replacement>
-                                    <token>
-                                        <![CDATA[(?<=gcr.io/mirrornode/hedera-mirror-(grpc|importer|monitor|rest|rosetta|test):)[0-9a-zA-Z.-]+]]></token>
-                                    <value>${release.version}</value>
-                                </replacement>
-                            </replacements>
                         </configuration>
                         <executions>
                             <execution>
+                                <id>chart</id>
                                 <goals>
                                     <goal>replace</goal>
                                 </goals>
                                 <inherited>false</inherited>
                                 <phase>prepare-package</phase>
+                                <configuration>
+                                    <includes>
+                                        <include>charts/**/Chart.yaml</include>
+                                    </includes>
+                                    <regexFlags>
+                                        <regexFlag>MULTILINE</regexFlag>
+                                    </regexFlags>
+                                    <replacements>
+                                        <replacement>
+                                            <token><![CDATA[(?<=^appVersion: ")[0-9a-zA-Z.-]+]]></token>
+                                            <value>${release.version}</value>
+                                        </replacement>
+                                        <replacement>
+                                            <token><![CDATA[(?<=^version: )[0-9a-zA-Z.-]+]]></token>
+                                            <value>${release.chartVersion}</value>
+                                        </replacement>
+                                    </replacements>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>others</id>
+                                <goals>
+                                    <goal>replace</goal>
+                                </goals>
+                                <inherited>false</inherited>
+                                <phase>prepare-package</phase>
+                                <configuration>
+                                    <includes>
+                                        <include>docker-compose.yml</include>
+                                        <include>hedera-mirror-rest/**/openapi.yml</include>
+                                        <include>hedera-mirror-rest/package*.json</include>
+                                        <include>hedera-mirror-rest/monitoring/monitor_apis/package*.json</include>
+                                        <include>hedera-mirror-rosetta/config/application*.yml</include>
+                                        <include>hedera-mirror-test/src/test/resources/k8s/*.yml</include>
+                                    </includes>
+                                    <replacements>
+                                        <replacement>
+                                            <token>
+                                                <![CDATA[(?<="hedera-mirror-(rest|monitor)",\s{3}"version": ")[^"]+]]></token>
+                                            <value>${release.version}</value>
+                                        </replacement>
+                                        <replacement>
+                                            <token><![CDATA[(?<=(\s{3})version: )[0-9a-zA-Z.-]+]]></token>
+                                            <value>${release.version}</value>
+                                        </replacement>
+                                        <replacement>
+                                            <token>
+                                                <![CDATA[(?<=gcr.io/mirrornode/hedera-mirror-(grpc|importer|monitor|rest|rosetta|test):)[0-9a-zA-Z.-]+]]></token>
+                                            <value>${release.version}</value>
+                                        </replacement>
+                                    </replacements>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
