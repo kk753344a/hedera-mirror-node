@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version'
+        description: 'Version (semver)'
         required: true
       chartVersion:
-        description: 'Chart Version'
+        description: 'Chart Version (semver)'
         required: true
 
 jobs:
@@ -62,15 +62,16 @@ jobs:
             title=${milestones[$i]}
             if [[ "$title" =~ $VERSION_REGEX ]]; then
               MILESTONE_NUMBER=${milestones[$((i+1))]}
-              MILESTONE_DESCRIPTION=$(curl -s -H "$GITHUB_HEADER" $MILESTONE_BASE_URL/$MILESTONE_NUMBER | jq -r '.description')
+              MILESTONE_DESCRIPTION_FILE=$(mktemp)
+              curl -s -H "$GITHUB_HEADER" $MILESTONE_BASE_URL/$MILESTONE_NUMBER | jq -r '.description' | sed 's/\r$//' > $MILESTONE_DESCRIPTION_FILE
               echo "MILESTONE_NUMBER=$MILESTONE_NUMBER" >> $GITHUB_ENV
-              echo MILESTONE_DESCRIPTION=\"$MILESTONE_DESCRIPTION\" >> $GITHUB_ENV
+              echo "MILESTONE_DESCRIPTION_FILE=$MILESTONE_DESCRIPTION_FILE" >> $GITHUB_ENV
               exit 0
             fi
             i=$((i+2))
           done
 
-          echo "No matching milestone found" && fail
+          echo "No matching milestone found" && exit 1
         env:
           VERSION_REGEX: '${{ steps.version_parser.outputs.major }}\.${{ steps.version_parser.outputs.minor }}\.${{ steps.version_parser.outputs.patch }}$'
 
@@ -120,12 +121,7 @@ jobs:
           TMP_RELEASE_NOTES=$(mktemp --suffix .md)
 
           # copy to a temporary file for modification due to lack of write permsision
-          if [ ! -z "$MILESTONE_DESCRIPTION" ]; then
-            echo -e "$MILESTONE_DESCRIPTION\n" > $GITHUB_RELEASE_NOTES
-            cat $RELEASE_NOTES_FULLNAME >> $GITHUB_RELEASE_NOTES
-          else
-            cp $RELEASE_NOTES_FULLNAME $GITHUB_RELEASE_NOTES
-          fi
+          cat $MILESTONE_DESCRIPTION_FILE $RELEASE_NOTES_FULLNAME > $GITHUB_RELEASE_NOTES
           RELEASE_NOTES=$(sed -r 's/^(#+) /\1# /g' $GITHUB_RELEASE_NOTES)
 
           CHANGELOG_TITLE="# Hedera Mirror Node Changelog"
