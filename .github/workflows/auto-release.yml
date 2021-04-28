@@ -1,8 +1,6 @@
 name: Automated Release
 
 on:
-  milestone:
-    types: [closed]
   workflow_dispatch:
     inputs:
       version:
@@ -19,53 +17,60 @@ jobs:
       CHANGELOG: CHANGELOG.md
       RELEASE_NOTES_FILENAME: release_notes
       RELEASE_NOTES_FULLNAME: release_notes.md
-      SEMVER_REGEX: '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?'
 
     steps:
-      - name: Get Version from Milestone
-        if: ${{ github.event_name == 'milestone' }}
-        run: |
-          TITLE="${{ github.event.milestone.title }}"
-          [[ "$TITLE" =~ $SEMVER_REGEX ]] || { echo "Invalid milestone title $TITLE"; exit 1; }
-          RELEASE_VERSION=${BASH_REMATCH}
-          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_ENV
-
-      - name: Get Version from Workflow Dispatch Input
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: echo RELEASE_VERSION="${{ github.event.inputs.version }}" >> $GITHUB_ENV
-
       - name: Parse Version
-        id: release_semver
-        uses: apexskier/github-semver-parse@v1
+        id: version_parser
+        uses: terradatum/semver-action@v1
         with:
-          version: ${{ env.RELEASE_VERSION }}
+          bump: preminor
+          version: ${{ github.event.inputs.version }}
 
-      - name: Verify Version Prerelease
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.release_semver.outputs.prerelease == '' }}
-        run: echo "Workflow dispatch not supported for GA release, and the milestone should be closed instead" && exit 1
+      - name: Parse Chart Version
+        id: chart_version_parser
+        uses: terradatum/semver-action@v1
+        with:
+          bump: preminor
+          version: ${{ github.event.inputs.chartVersion }}
+
+      - name: Set Prerelease
+        if: ${{ contains(steps.version_parser.outputs.version, '-') }}
+        run: echo "PRERELEASE=true" >> $GITHUB_ENV
 
       - name: Set Release Environment Variables
         run: |
-          [[ -z "${{ steps.release_semver.outputs.version }}" ]] && { echo "Invalid version"; exit 1; }
-          RELEASE_BRANCH="release/${{ steps.release_semver.outputs.major }}.${{ steps.release_semver.outputs.minor }}"
-          RELEASE_TAG=v${RELEASE_VERSION}
-          RELEASE_VERSION_NEXT_MINOR=$((${{ steps.release_semver.outputs.minor }}+1))
-          RELEASE_VERSION_NEXT_SNAPSHOT="${{ steps.release_semver.outputs.major }}.${RELEASE_VERSION_NEXT_MINOR}.0-SNAPSHOT"
-
+          RELEASE_BRANCH="release/${{ steps.version_parser.outputs.major }}.${{ steps.version_parser.outputs.minor }}"
+          RELEASE_TAG=v${{ steps.version_parser.outputs.version }}
+          [[ "$PRERELEASE" != 'true' ]] && echo "CREATE_PULL_REQUEST=true" >> $GITHUB_ENV
           echo "RELEASE_BRANCH=${RELEASE_BRANCH}" >> $GITHUB_ENV
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
-          echo "RELEASE_VERSION_NEXT_SNAPSHOT=${RELEASE_VERSION_NEXT_SNAPSHOT}" >> $GITHUB_ENV
 
-      - name: Parse Chart Version from Workflow Dispatch Input
-        uses: apexskier/github-semver-parse@v1
-        id: input_chart_semver
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        with:
-          version: ${{ github.event.inputs.chartVersion }}
+      - name: Get Milestone
+        if: ${{ env.PRERELEASE != 'true' }}
+        run: |
+          response=$(curl -s -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${{ github.repository }}/milestones)
 
-      - name: Verify Chart Version Prerelease
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.input_chart_semver.outputs.prerelease == '' }}
-        run: echo "Workflow dispatch not supported for GA release, and the milestone should be closed instead" && exit 1
+          OLD_IFS=$IFS
+          IFS=$'\n'
+          milestones=($(echo $response | jq -r '.[] | .title, .number, .description'))
+          IFS=$OLD_IFS
+
+          for (( i=0; i<${#milestones[@]}; ))
+          do
+            title=${milestones[$i]}
+            if [[ "$title" =~ $VERSION_REGEX ]]; then
+              MILESTONE_NUMBER=${milestones[$((i+1))]}
+              MILESTONE_DESCRIPTION="${milestones[$((i+2))]}"
+              echo "MILESTONE_NUMBER=$MILESTONE_NUMBER" >> $GITHUB_ENV
+              echo MILESTONE_DESCRIPTION="$MILESTONE_DESCRIPTION" >> $GITHUB_ENV
+              exit 0
+            fi
+            i=$((i+3))
+          done
+
+          echo "No matching milestone found" && fail
+        env:
+          VERSION_REGEX: '${{ steps.version_parser.outputs.major }}\.${{ steps.version_parser.outputs.minor }}\.${{ steps.version_parser.outputs.patch }}$'
 
       - name: Checkout Repository
         uses: actions/checkout@v2
@@ -84,56 +89,28 @@ jobs:
           if ! git ls-remote --exit-code --heads --quiet origin refs/heads/${RELEASE_BRANCH}; then
             git checkout -b ${RELEASE_BRANCH}
             git push -u origin ${RELEASE_BRANCH}
+
+            echo "CREATE_PULL_REQUEST=true" >> $GITHUB_ENV
           else
             git checkout ${RELEASE_BRANCH}
           fi
 
-      - name: Get Chart Version from Workflow Dispatch Input
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          CHART_VERSION="${{ github.event.inputs.chartVersion }}"
-          echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
-
-      - name: Get Chart Version from Release Branch
-        if: ${{ github.event_name == 'milestone' }}
-        run: |
-          CHART_VERSION=$(sed -rn 's/<release\.chartVersion>([0-9.]*).*<\/release.chartVersion>/\1/p' pom.xml | xargs)
-          echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
-
-      - name: Parse Chart Version
-        id: chart_semver
-        uses: apexskier/github-semver-parse@v1
-        with:
-          version: ${{ env.CHART_VERSION }}
-
-      - name: Set Chart Version for Patch Release
-        if: ${{ steps.release_semver.outputs.patch != 0 && steps.chart_semver.outputs.prerelease == '' }}
-        run: |
-          CHART_VERSION_PATCH=$((${{ steps.chart_semver.outputs.patch }}+1))
-          CHART_VERSION="${{ steps.chart_semver.outputs.major }}.${{ steps.chart_semver.outputs.minor }}.${CHART_VERSION_PATCH}"
-          echo "CHART_VERSION=${CHART_VERSION}" >> $GITHUB_ENV
-
-      - name: Set Next Chart Snapshot Version
-        run: |
-          [[ -z "${{ steps.chart_semver.outputs.version }}" ]] && { echo "Invalid chart version"; exit 1; }
-          CHART_VERSION_NEXT_MINOR=$((${{ steps.chart_semver.outputs.minor }}+1))
-          CHART_VERSION_NEXT_SNAPSHOT="${{ steps.chart_semver.outputs.major }}.${CHART_VERSION_NEXT_MINOR}.0-SNAPSHOT"
-          echo "CHART_VERSION_NEXT_SNAPSHOT=${CHART_VERSION_NEXT_SNAPSHOT}" >> $GITHUB_ENV
-
       - name: Maven Release
-        run: ./mvnw clean package -Drelease.version=$RELEASE_VERSION -Drelease.chartVersion=$CHART_VERSION -N -P=release
+        run: ./mvnw clean package -Drelease.version=$VERSION -Drelease.chartVersion=$CHART_VERSION -N -P=release
+        env:
+          VERSION: ${{ steps.version_parser.outputs.version }}
+          CHART_VERSION: ${{ steps.chart_version_parser.outputs.version }}
 
       - name: Create Release Notes
-        if: ${{ github.event_name == 'milestone' }}
-        uses: Decathlon/release-notes-generator-action@v3.1.4
+        if: ${{ env.PRERELEASE != 'true' }}
+        uses: xin-hedera/release-notes-generator-action@v3.1.5-rc1
         env:
           FILENAME: ${{ env.RELEASE_NOTES_FILENAME }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Changelog
-        if: ${{ github.event_name == 'milestone' }}
+        if: ${{ env.PRERELEASE != 'true' }}
         run: |
-          DESCRIPTION="${{ github.event.milestone.description }}"
           RELEASE_DATE=$(date +%Y-%m-%d)
 
           GITHUB_RELEASE_NOTES=$(mktemp --suffix .md)
@@ -141,8 +118,8 @@ jobs:
           TMP_RELEASE_NOTES=$(mktemp --suffix .md)
 
           # copy to a temporary file for modification due to lack of write permsision
-          if [ ! -z "$DESCRIPTION" ]; then
-            echo -e "$DESCRIPTION\n" > $GITHUB_RELEASE_NOTES
+          if [ ! -z "$MILESTONE_DESCRIPTION" ]; then
+            echo -e "$MILESTONE_DESCRIPTION\n" > $GITHUB_RELEASE_NOTES
             cat $RELEASE_NOTES_FULLNAME >> $GITHUB_RELEASE_NOTES
           else
             cp $RELEASE_NOTES_FULLNAME $GITHUB_RELEASE_NOTES
@@ -154,7 +131,7 @@ jobs:
           cat > $CHANGELOG <<EOF
           ${CHANGELOG_TITLE}
 
-          ## ${RELEASE_VERSION} (${RELEASE_DATE})
+          ## ${{ steps.version_parser.outputs.version }} (${RELEASE_DATE})
 
           ${RELEASE_NOTES}
 
@@ -171,21 +148,32 @@ jobs:
           tagging_message: ${{ env.RELEASE_TAG }}
 
       - name: Reset Master to Release Branch
+        if: ${{ env.CREATE_PULL_REQUEST == 'true' }}
         run: |
           git checkout master
           git reset --hard ${RELEASE_BRANCH}
 
+      - name: Set Snapshot Versions
+        if: ${{ env.CREATE_PULL_REQUEST == 'true' }}
+        run: |
+          NEXT_VERSION_SNAPSHOT="${{ steps.version_parser.outputs.next-major }}.${{ steps.version_parser.outputs.next-minor }}.0-SNAPSHOT"
+          NEXT_CHART_VERSION_SNAPSHOT="${{ steps.chart_version_parser.outputs.next-major }}.${{ steps.chart_version_parser.outputs.next-minor }}.0-SNAPSHOT"
+          echo "NEXT_VERSION_SNAPSHOT=$NEXT_VERSION_SNAPSHOT" >> $GITHUB_ENV
+          echo "NEXT_CHART_VERSION_SNAPSHOT=$NEXT_CHART_VERSION_SNAPSHOT" >> $GITHUB_ENV
+
       - name: Maven Release for Next Minor Snapshot
-        run: ./mvnw clean package -Drelease.version=$RELEASE_VERSION_NEXT_SNAPSHOT -Drelease.chartVersion=$CHART_VERSION_NEXT_SNAPSHOT -N -P=release
+        if: ${{ env.CREATE_PULL_REQUEST == 'true' }}
+        run: ./mvnw clean package -Drelease.version=$NEXT_VERSION_SNAPSHOT -Drelease.chartVersion=$NEXT_CHART_VERSION_SNAPSHOT -N -P=release
 
       - name: Create Pull Request
+        if: ${{ env.CREATE_PULL_REQUEST == 'true' }}
         uses: peter-evans/create-pull-request@v3
         with:
           body: ''
           branch: create-pull-request/${{ env.RELEASE_BRANCH }}
           delete-branch: true
           signoff: true
-          title: Bump version to v${{ env.RELEASE_VERSION_NEXT_SNAPSHOT }} and merge changes from ${{ env.RELEASE_BRANCH }}
+          title: ${{ fromJSON(format('["Merge changes from {0}", "Bump versions for v{1}"]', env.RELEASE_BRANCH, env.NEXT_VERSION_SNAPSHOT))[env.PRERELEASE == 'true'] }}
 
       - name: Create Github Release
         uses: ncipollo/release-action@v1
@@ -197,3 +185,11 @@ jobs:
           prerelease: ${{ steps.release_semver.outputs.prerelease != '' }}
           tag: ${{ env.RELEASE_TAG }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Close Milestone
+        if: ${{ env.PRERELEASE != 'true' }}
+        uses: WyriHaximus/github-action-close-milestone@0.1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          number: ${{ env.MILESTONE_NUMBER }}
