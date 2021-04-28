@@ -169,6 +169,7 @@ jobs:
         with:
           body: ''
           branch: create-pull-request/${{ env.RELEASE_BRANCH }}
+          commit-message: Bump versions for v${{ env.NEXT_VERSION_SNAPSHOT }}
           delete-branch: true
           signoff: true
           title: ${{ fromJSON(format('["Merge changes from {0}", "Bump versions for v{1}"]', env.RELEASE_BRANCH, env.NEXT_VERSION_SNAPSHOT))[env.PRERELEASE == 'true'] }}
