@@ -48,11 +48,13 @@ jobs:
       - name: Get Milestone
         if: ${{ env.PRERELEASE != 'true' }}
         run: |
-          response=$(curl -s -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/${{ github.repository }}/milestones)
+          GITHUB_HEADER="Accept: application/vnd.github.v3+json"
+          MILESTONE_BASE_URL=https://api.github.com/repos/${{ github.repository }}/milestones
+          response=$(curl -s -H "$GITHUB_HEADER" $MILESTONE_BASE_URL)
 
           OLD_IFS=$IFS
           IFS=$'\n'
-          milestones=($(echo $response | jq -r '.[] | .title, .number, .description'))
+          milestones=($(echo $response | jq -r '.[] | .title, .number'))
           IFS=$OLD_IFS
 
           for (( i=0; i<${#milestones[@]}; ))
@@ -60,12 +62,12 @@ jobs:
             title=${milestones[$i]}
             if [[ "$title" =~ $VERSION_REGEX ]]; then
               MILESTONE_NUMBER=${milestones[$((i+1))]}
-              MILESTONE_DESCRIPTION="${milestones[$((i+2))]}"
+              MILESTONE_DESCRIPTION=$(curl -s -H "$GITHUB_HEADER" $MILESTONE_BASE_URL/$MILESTONE_NUMBER | jq -r '.description')
               echo "MILESTONE_NUMBER=$MILESTONE_NUMBER" >> $GITHUB_ENV
-              echo MILESTONE_DESCRIPTION="$MILESTONE_DESCRIPTION" >> $GITHUB_ENV
+              echo MILESTONE_DESCRIPTION=\"$MILESTONE_DESCRIPTION\" >> $GITHUB_ENV
               exit 0
             fi
-            i=$((i+3))
+            i=$((i+2))
           done
 
           echo "No matching milestone found" && fail
