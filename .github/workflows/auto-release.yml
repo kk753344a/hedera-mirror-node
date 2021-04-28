@@ -121,7 +121,7 @@ jobs:
           TMP_RELEASE_NOTES=$(mktemp --suffix .md)
 
           # copy to a temporary file for modification due to lack of write permsision
-          cat $MILESTONE_DESCRIPTION_FILE $RELEASE_NOTES_FULLNAME > $GITHUB_RELEASE_NOTES
+          echo | cat $MILESTONE_DESCRIPTION_FILE - $RELEASE_NOTES_FULLNAME > $GITHUB_RELEASE_NOTES
           RELEASE_NOTES=$(sed -r 's/^(#+) /\1# /g' $GITHUB_RELEASE_NOTES)
 
           CHANGELOG_TITLE="# Hedera Mirror Node Changelog"
